@@ -24,17 +24,32 @@ export default function LoginPage() {
         password,
       });
 
-      login(res.data.access_token, res.data.user);
-      navigate('/dashboard');
+      if (res.data?.access_token) {
+        login(res.data.access_token, res.data.user);
+        navigate('/dashboard');
+      } else {
+        setError('Login succeeded, but authentication token was missing.');
+      }
     } catch (err) {
       console.error('Login error:', err);
-      if (err.response?.data?.detail) {
-        setError(err.response.data.detail);
+      let errorMsg = 'Failed to authenticate. Please verify your credentials.';
+
+      const detail = err.response?.data?.detail;
+      if (typeof detail === 'string') {
+        errorMsg = detail;
+      } else if (Array.isArray(detail)) {
+        errorMsg = detail.map((item) => item.msg || JSON.stringify(item)).join('. ');
+      } else if (detail && typeof detail === 'object') {
+        errorMsg = detail.msg || detail.message || JSON.stringify(detail);
+      } else if (err.response?.data?.message) {
+        errorMsg = err.response.data.message;
       } else if (err.code === 'ERR_NETWORK' || !err.response) {
-        setError('Cannot connect to backend server. Please verify the FastAPI backend is running on http://127.0.0.1:8000.');
-      } else {
-        setError('Failed to authenticate. Please verify your credentials.');
+        errorMsg = 'Cannot connect to backend server. Please verify the FastAPI backend is running on http://127.0.0.1:8000.';
+      } else if (err.response?.status === 500 || err.response?.status === 502 || err.response?.status === 504) {
+        errorMsg = 'Backend server communication error. Please ensure the backend is running.';
       }
+
+      setError(errorMsg);
     } finally {
       setLoading(false);
     }

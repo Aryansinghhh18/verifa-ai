@@ -29,11 +29,26 @@ class Settings(BaseSettings):
     CORS_ORIGINS: Union[List[str], str] = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
         "http://localhost:3000",
-        "http://127.0.0.1:3000"
+        "http://127.0.0.1:3000",
+        "http://localhost:4173",
+        "http://127.0.0.1:4173",
     ]
     REQUEST_TIMEOUT_SECONDS: int = 30
     MAX_RESPONSE_SIZE_BYTES: int = 5 * 1024 * 1024  # 5MB
+
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def assemble_db_url(cls, v: str) -> str:
+        if v and "sqlite+aiosqlite:///." in v:
+            from pathlib import Path
+            base_dir = Path(__file__).resolve().parent.parent
+            db_name = v.split("///.")[-1].lstrip("/\\")
+            abs_db_path = (base_dir / db_name).resolve().as_posix()
+            return f"sqlite+aiosqlite:///{abs_db_path}"
+        return v
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod

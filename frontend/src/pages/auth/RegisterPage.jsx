@@ -49,17 +49,33 @@ export default function RegisterPage() {
         password,
       });
 
-      login(res.data.access_token, res.data.user);
-      navigate('/dashboard');
+      if (res.data?.access_token) {
+        login(res.data.access_token, res.data.user);
+        navigate('/dashboard');
+      } else {
+        setError('Account created, but token was missing. Please log in.');
+      }
     } catch (err) {
       console.error('Registration error:', err);
-      if (err.response?.data?.detail) {
-        setError(err.response.data.detail);
+      let errorMsg = 'Failed to create account. Please try again.';
+
+      const detail = err.response?.data?.detail;
+      if (typeof detail === 'string') {
+        errorMsg = detail;
+      } else if (Array.isArray(detail)) {
+        // FastAPI / Pydantic 422 validation errors
+        errorMsg = detail.map((item) => item.msg || JSON.stringify(item)).join('. ');
+      } else if (detail && typeof detail === 'object') {
+        errorMsg = detail.msg || detail.message || JSON.stringify(detail);
+      } else if (err.response?.data?.message) {
+        errorMsg = err.response.data.message;
       } else if (err.code === 'ERR_NETWORK' || !err.response) {
-        setError('Cannot connect to backend server. Please verify the FastAPI backend is running on http://127.0.0.1:8000.');
-      } else {
-        setError('Failed to create account. Please try again.');
+        errorMsg = 'Cannot connect to backend server. Please verify the FastAPI backend is running on http://127.0.0.1:8000.';
+      } else if (err.response?.status === 500 || err.response?.status === 502 || err.response?.status === 504) {
+        errorMsg = 'Backend server communication error. Please ensure the backend is running.';
       }
+
+      setError(errorMsg);
     } finally {
       setLoading(false);
     }
@@ -99,7 +115,16 @@ export default function RegisterPage() {
         {error && (
           <div className="mb-5 p-3.5 rounded-xl border border-red-500/40 bg-red-500/10 text-red-300 text-xs flex items-start gap-2.5">
             <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-            <span>{error}</span>
+            <div className="flex-1">
+              <span>{error}</span>
+              {typeof error === 'string' && error.includes('already exists') && (
+                <div className="mt-1.5">
+                  <Link to="/login" className="text-brand-yellow hover:underline font-semibold">
+                    Sign in to your account &rarr;
+                  </Link>
+                </div>
+              )}
+            </div>
           </div>
         )}
 

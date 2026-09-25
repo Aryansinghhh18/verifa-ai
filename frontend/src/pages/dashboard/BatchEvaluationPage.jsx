@@ -188,7 +188,10 @@ export default function BatchEvaluationPage() {
       try {
         const progRes = await api.get(`/batch/${jobId}/progress`);
         const prog = progRes.data;
-        setJobProgress(prog);
+        setJobProgress({
+          ...prog,
+          job_id: prog.job_id || prog.id || jobId,
+        });
 
         if (prog.status === 'completed' || prog.status === 'failed') {
           clearInterval(pollIntervalRef.current);
@@ -213,7 +216,10 @@ export default function BatchEvaluationPage() {
         api.get(`/batch/${jobId}/progress`),
         api.get(`/batch/${jobId}`),
       ]);
-      setJobProgress(progRes.data);
+      setJobProgress({
+        ...progRes.data,
+        job_id: progRes.data.job_id || progRes.data.id || jobId,
+      });
       setJobDetail(detailRes.data);
       if (progRes.data.status === 'processing' || progRes.data.status === 'pending') {
         setIsProcessing(true);
@@ -567,25 +573,27 @@ export default function BatchEvaluationPage() {
                   Batch Execution Progress
                 </span>
                 <span className="text-xs font-mono text-slate-400">
-                  (Job: {jobProgress.job_id.slice(0, 8)}...)
+                  (Job: {(jobProgress.job_id || jobProgress.id || currentJobId || '').slice(0, 8)}...)
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
                 {jobProgress.status === 'completed'
                   ? 'All test cases evaluated with Vectara HHEM.'
                   : jobProgress.status === 'processing'
-                  ? `Processing cases with Vectara HHEM... (${jobProgress.completed_cases} of ${jobProgress.total_cases})`
+                  ? `Processing cases with Vectara HHEM... (${jobProgress.completed_cases ?? 0} of ${jobProgress.total_cases ?? 0})`
                   : 'Batch initialized...'}
               </p>
             </div>
 
             <div className="flex items-center gap-3">
               <span className="text-xl font-bold font-mono text-brand-yellow">
-                {jobProgress.progress_percentage.toFixed(0)}%
+                {typeof jobProgress.progress_percentage === 'number'
+                  ? Math.round(jobProgress.progress_percentage)
+                  : 0}%
               </span>
               {jobProgress.status === 'completed' && (
                 <button
-                  onClick={() => handleDownloadReport(jobProgress.job_id)}
+                  onClick={() => handleDownloadReport(jobProgress.job_id || jobProgress.id || currentJobId)}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-emerald/10 border border-brand-emerald/30 text-brand-emerald hover:bg-brand-emerald/20 text-xs font-semibold transition-colors"
                 >
                   <Download className="w-3.5 h-3.5" />
@@ -605,7 +613,17 @@ export default function BatchEvaluationPage() {
                   ? 'bg-red-500'
                   : 'bg-brand-yellow'
               }`}
-              style={{ width: `${Math.min(100, Math.max(0, jobProgress.progress_percentage))}%` }}
+              style={{
+                width: `${Math.min(
+                  100,
+                  Math.max(
+                    0,
+                    typeof jobProgress.progress_percentage === 'number'
+                      ? jobProgress.progress_percentage
+                      : 0
+                  )
+                )}%`,
+              }}
             />
           </div>
         </div>
@@ -617,17 +635,17 @@ export default function BatchEvaluationPage() {
           <div className="p-4 rounded-xl border border-surface-border bg-surface-card/40">
             <div className="text-xs text-slate-400 font-medium">Total Cases</div>
             <div className="text-2xl font-bold text-white mt-1 font-mono">
-              {jobDetail.summary.total_cases}
+              {jobDetail.summary.total_cases ?? 0}
             </div>
             <div className="text-[11px] text-slate-500 mt-1">
-              {jobDetail.summary.completed_cases} success · {jobDetail.summary.failed_cases} errors
+              {jobDetail.summary.completed_cases ?? 0} success · {jobDetail.summary.failed_cases ?? 0} errors
             </div>
           </div>
 
           <div className="p-4 rounded-xl border border-surface-border bg-surface-card/40">
             <div className="text-xs text-slate-400 font-medium">Avg Factual Consistency</div>
             <div className="text-2xl font-bold text-brand-yellow mt-1 font-mono">
-              {jobDetail.summary.average_hhem_score !== null
+              {typeof jobDetail.summary.average_hhem_score === 'number'
                 ? `${(jobDetail.summary.average_hhem_score * 100).toFixed(1)}%`
                 : 'N/A'}
             </div>
@@ -640,13 +658,13 @@ export default function BatchEvaluationPage() {
             <div className="text-xs text-slate-400 font-medium">Risk Breakdown</div>
             <div className="flex items-center gap-1.5 mt-2">
               <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-brand-emerald/10 text-brand-emerald border border-brand-emerald/20">
-                {jobDetail.summary.risk_breakdown.low} Low
+                {jobDetail.summary.low_risk_count ?? jobDetail.summary.risk_breakdown?.low ?? 0} Low
               </span>
               <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-brand-yellow/10 text-brand-yellow border border-brand-yellow/20">
-                {jobDetail.summary.risk_breakdown.medium} Med
+                {jobDetail.summary.medium_risk_count ?? jobDetail.summary.risk_breakdown?.medium ?? 0} Med
               </span>
               <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-red-500/10 text-red-400 border border-red-500/20">
-                {jobDetail.summary.risk_breakdown.high} High
+                {jobDetail.summary.high_risk_count ?? jobDetail.summary.risk_breakdown?.high ?? 0} High
               </span>
             </div>
             <div className="text-[11px] text-slate-500 mt-1.5">
@@ -657,7 +675,11 @@ export default function BatchEvaluationPage() {
           <div className="p-4 rounded-xl border border-surface-border bg-surface-card/40">
             <div className="text-xs text-slate-400 font-medium">Execution Time</div>
             <div className="text-2xl font-bold text-slate-200 mt-1 font-mono">
-              {jobDetail.summary.total_latency_seconds.toFixed(2)}s
+              {(
+                jobDetail.summary.processing_time_seconds ??
+                jobDetail.summary.total_latency_seconds ??
+                0
+              ).toFixed(2)}s
             </div>
             <div className="text-[11px] text-slate-500 mt-1">
               Total batch turnaround
@@ -696,14 +718,22 @@ export default function BatchEvaluationPage() {
                 className="bg-surface-darkest border border-surface-border rounded-lg px-2.5 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-brand-yellow"
               >
                 <option value="all">All Risks ({jobDetail.results.length})</option>
-                <option value="low">Low Risk ({jobDetail.summary.risk_breakdown.low})</option>
-                <option value="medium">Medium Risk ({jobDetail.summary.risk_breakdown.medium})</option>
-                <option value="high">High Risk ({jobDetail.summary.risk_breakdown.high})</option>
-                <option value="error">Errors ({jobDetail.summary.failed_cases})</option>
+                <option value="low">
+                  Low Risk ({jobDetail.summary?.low_risk_count ?? jobDetail.summary?.risk_breakdown?.low ?? 0})
+                </option>
+                <option value="medium">
+                  Medium Risk ({jobDetail.summary?.medium_risk_count ?? jobDetail.summary?.risk_breakdown?.medium ?? 0})
+                </option>
+                <option value="high">
+                  High Risk ({jobDetail.summary?.high_risk_count ?? jobDetail.summary?.risk_breakdown?.high ?? 0})
+                </option>
+                <option value="error">
+                  Errors ({jobDetail.summary?.failed_cases ?? 0})
+                </option>
               </select>
 
               <button
-                onClick={() => handleDownloadReport(jobDetail.id)}
+                onClick={() => handleDownloadReport(jobDetail.id || currentJobId)}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-surface-border bg-surface-darkest hover:bg-surface-hover text-xs font-semibold text-slate-200 transition-colors"
               >
                 <Download className="w-3.5 h-3.5 text-brand-yellow" />

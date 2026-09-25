@@ -340,7 +340,13 @@ class BatchService:
             low_risk_count=low_count,
             medium_risk_count=med_count,
             high_risk_count=high_count,
-            processing_time_seconds=processing_seconds
+            processing_time_seconds=processing_seconds,
+            risk_breakdown={
+                "low": low_count,
+                "medium": med_count,
+                "high": high_count,
+            },
+            total_latency_seconds=processing_seconds,
         )
 
         return BatchJobResponse(
@@ -377,6 +383,7 @@ class BatchService:
 
         return BatchJobProgress(
             id=job.id,
+            job_id=job.id,
             status=job.status,
             total_cases=job.total_cases,
             completed_cases=job.completed_cases,

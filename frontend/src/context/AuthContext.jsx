@@ -13,8 +13,10 @@ export const AuthProvider = ({ children }) => {
       const savedToken = localStorage.getItem('verifa_token');
       if (savedToken) {
         try {
+          api.defaults.headers.common['Authorization'] = `Bearer ${savedToken}`;
           const res = await api.get('/auth/me');
           setUser(res.data);
+          setToken(savedToken);
         } catch (err) {
           console.error("Auth check failed:", err);
           logout();
@@ -24,22 +26,32 @@ export const AuthProvider = ({ children }) => {
     };
 
     verifyAuth();
-  }, [token]);
+  }, []);
 
   const login = (authToken, userData) => {
     localStorage.setItem('verifa_token', authToken);
+    api.defaults.headers.common['Authorization'] = `Bearer ${authToken}`;
     setToken(authToken);
     setUser(userData);
+    setIsLoading(false);
   };
 
   const logout = () => {
     localStorage.removeItem('verifa_token');
+    delete api.defaults.headers.common['Authorization'];
     setToken(null);
     setUser(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, isAuthenticated: !!token, isLoading, login, logout }}>
+    <AuthContext.Provider value={{
+      user,
+      token,
+      isAuthenticated: Boolean(token || localStorage.getItem('verifa_token')),
+      isLoading,
+      login,
+      logout
+    }}>
       {children}
     </AuthContext.Provider>
   );

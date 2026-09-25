@@ -8,7 +8,13 @@ const api = axios.create({
   timeout: 30000,
 });
 
-// Request interceptor to attach JWT token
+// Initialize Authorization header from existing token
+const storedToken = localStorage.getItem('verifa_token');
+if (storedToken) {
+  api.defaults.headers.common['Authorization'] = `Bearer ${storedToken}`;
+}
+
+// Request interceptor to ensure latest JWT token is always attached
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('verifa_token');
@@ -20,14 +26,22 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Response interceptor to handle unauthenticated 401s
+// Response interceptor to handle unauthenticated 401s on protected pages
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response && error.response.status === 401) {
       localStorage.removeItem('verifa_token');
-      // If not already on login or register, redirect
-      if (!window.location.pathname.startsWith('/auth') && window.location.pathname !== '/') {
+      delete api.defaults.headers.common['Authorization'];
+      
+      const currentPath = window.location.pathname;
+      const isPublicAuthPage =
+        currentPath === '/login' ||
+        currentPath === '/register' ||
+        currentPath.startsWith('/auth') ||
+        currentPath === '/';
+
+      if (!isPublicAuthPage) {
         window.location.href = '/login';
       }
     }

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -23,6 +23,8 @@ class BatchSummary(BaseModel):
     medium_risk_count: int = 0
     high_risk_count: int = 0
     processing_time_seconds: float = 0.0
+    risk_breakdown: Optional[Dict[str, int]] = None
+    total_latency_seconds: Optional[float] = None
 
 
 class BatchJobResponse(BaseModel):
@@ -44,6 +46,7 @@ class BatchJobResponse(BaseModel):
 
 class BatchJobProgress(BaseModel):
     id: str
+    job_id: Optional[str] = None
     status: str
     total_cases: int
     completed_cases: int
