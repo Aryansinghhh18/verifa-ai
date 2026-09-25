@@ -39,6 +39,15 @@ export default function NewEvaluationPage() {
   // Copy state
   const [copied, setCopied] = useState(false);
 
+  // Derived validation states
+  const isHhemActive = selectedMetrics.includes('hallucination');
+  const isReferenceEmpty = !referenceEvidence || !referenceEvidence.trim();
+  const isSubmitDisabled =
+    running ||
+    chatbots.length === 0 ||
+    !prompt.trim() ||
+    (isHhemActive && isReferenceEmpty);
+
   useEffect(() => {
     const fetchBots = async () => {
       try {
@@ -57,8 +66,28 @@ export default function NewEvaluationPage() {
     fetchBots();
   }, []);
 
+  const toggleMetric = (metricKey) => {
+    if (running) return;
+    setSelectedMetrics((prev) => {
+      if (prev.includes(metricKey)) {
+        if (prev.length === 1) return prev; // Keep at least one metric selected
+        return prev.filter((m) => m !== metricKey);
+      } else {
+        return [...prev, metricKey];
+      }
+    });
+  };
+
   const handleRunEvaluation = async (e) => {
     e.preventDefault();
+
+    if (isSubmitDisabled) {
+      if (isHhemActive && isReferenceEmpty) {
+        setError('Reference / evidence text is required to evaluate factual consistency with Vectara HHEM.');
+      }
+      return;
+    }
+
     if (!selectedBotId) {
       setError('Please select a connected chatbot endpoint.');
       return;
@@ -67,7 +96,7 @@ export default function NewEvaluationPage() {
       setError('Please enter a test prompt.');
       return;
     }
-    if (selectedMetrics.includes('hallucination') && !referenceEvidence.trim()) {
+    if (isHhemActive && isReferenceEmpty) {
       setError('Reference / evidence text is required to evaluate factual consistency with Vectara HHEM.');
       return;
     }
@@ -80,12 +109,13 @@ export default function NewEvaluationPage() {
       const res = await api.post('/evaluations/run', {
         chatbot_id: selectedBotId,
         prompt: prompt.trim(),
-        reference_evidence: referenceEvidence.trim() || null,
+        reference_evidence: isHhemActive ? referenceEvidence.trim() : (referenceEvidence.trim() || null),
         selected_metrics: selectedMetrics,
       });
       setEvaluationResult(res.data);
     } catch (err) {
       console.error('Evaluation error:', err);
+      setEvaluationResult(null);
       setError(
         err.response?.data?.detail ||
         'Evaluation failed. Please verify that your chatbot endpoint is responsive and reachable.'
@@ -189,19 +219,40 @@ export default function NewEvaluationPage() {
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider font-mono">
-                  Reference Evidence / Ground Truth *
+                  Reference Evidence / Ground Truth {isHhemActive ? '*' : '(Optional)'}
                 </label>
-                <span className="text-[10px] text-brand-yellow font-mono">Required for HHEM</span>
+                {isHhemActive ? (
+                  <span className="text-[10px] text-brand-yellow font-mono font-semibold">Required for HHEM</span>
+                ) : (
+                  <span className="text-[10px] text-slate-500 font-mono">Optional for Latency only</span>
+                )}
               </div>
               <textarea
                 rows={4}
-                required
+                required={isHhemActive}
                 disabled={running}
-                placeholder="e.g. The Eiffel Tower is a wrought-iron lattice tower on the Champ de Mars in Paris, France. It was completed in 1889 for the Exposition Universelle."
+                placeholder={
+                  isHhemActive
+                    ? "e.g. The Eiffel Tower is a wrought-iron lattice tower on the Champ de Mars in Paris, France. It was completed in 1889 for the Exposition Universelle."
+                    : "Reference evidence is optional since HHEM hallucination metric is turned off."
+                }
                 value={referenceEvidence}
                 onChange={(e) => setReferenceEvidence(e.target.value)}
-                className="w-full bg-surface-darkest border border-surface-border rounded-xl p-3 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-brand-yellow transition-colors font-sans"
+                className={`w-full bg-surface-darkest border rounded-xl p-3 text-xs text-slate-100 placeholder-slate-600 focus:outline-none transition-colors font-sans ${
+                  isHhemActive && isReferenceEmpty
+                    ? 'border-brand-yellow/50 focus:border-brand-yellow'
+                    : 'border-surface-border focus:border-brand-yellow'
+                }`}
               />
+
+              {/* Warning message stays visible while HHEM is active and Reference Evidence is empty */}
+              {isHhemActive && isReferenceEmpty && (
+                <div className="mt-2 p-2.5 rounded-lg border border-brand-yellow/40 bg-brand-yellow/10 text-brand-yellow text-xs flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0 text-brand-yellow" />
+                  <span>Reference / evidence text is required to evaluate factual consistency with Vectara HHEM.</span>
+                </div>
+              )}
+
               <span className="text-[10px] text-slate-400 mt-1 flex items-center gap-1.5">
                 <Info className="w-3.5 h-3.5 text-brand-cyan shrink-0" />
                 Vectara HHEM compares the chatbot hypothesis against this evidence premise to calculate factual consistency.
@@ -210,38 +261,69 @@ export default function NewEvaluationPage() {
 
             {/* Metric Selection */}
             <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-2 uppercase tracking-wider font-mono">
-                Evaluation Metrics
-              </label>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider font-mono">
+                  Evaluation Metrics
+                </label>
+                <span className="text-[10px] text-slate-500 font-mono">Click to toggle active metrics</span>
+              </div>
               <div className="grid grid-cols-2 gap-2.5">
-                <div className="p-3 rounded-xl border border-brand-yellow/40 bg-brand-yellow/5 flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={() => toggleMetric('hallucination')}
+                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between ${
+                    isHhemActive
+                      ? 'border-brand-yellow/60 bg-brand-yellow/10'
+                      : 'border-surface-border bg-surface-darkest/60 opacity-60 hover:opacity-100'
+                  }`}
+                >
                   <div className="flex items-center gap-2">
-                    <ShieldCheck className="w-4 h-4 text-brand-yellow" />
+                    <ShieldCheck className={`w-4 h-4 ${isHhemActive ? 'text-brand-yellow' : 'text-slate-400'}`} />
                     <span className="text-xs font-bold text-white">Hallucination (HHEM)</span>
                   </div>
-                  <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-brand-emerald/10 text-brand-emerald border border-brand-emerald/30 font-bold">
-                    ACTIVE
+                  <span
+                    className={`text-[9px] font-mono px-1.5 py-0.5 rounded font-bold ${
+                      isHhemActive
+                        ? 'bg-brand-emerald/10 text-brand-emerald border border-brand-emerald/30'
+                        : 'bg-slate-800 text-slate-400 border border-slate-700'
+                    }`}
+                  >
+                    {isHhemActive ? 'ACTIVE' : 'OFF'}
                   </span>
-                </div>
+                </button>
 
-                <div className="p-3 rounded-xl border border-brand-cyan/40 bg-brand-cyan/5 flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={() => toggleMetric('latency')}
+                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between ${
+                    selectedMetrics.includes('latency')
+                      ? 'border-brand-cyan/60 bg-brand-cyan/10'
+                      : 'border-surface-border bg-surface-darkest/60 opacity-60 hover:opacity-100'
+                  }`}
+                >
                   <div className="flex items-center gap-2">
-                    <Zap className="w-4 h-4 text-brand-cyan" />
+                    <Zap className={`w-4 h-4 ${selectedMetrics.includes('latency') ? 'text-brand-cyan' : 'text-slate-400'}`} />
                     <span className="text-xs font-bold text-white">Latency & Performance</span>
                   </div>
-                  <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-brand-emerald/10 text-brand-emerald border border-brand-emerald/30 font-bold">
-                    ACTIVE
+                  <span
+                    className={`text-[9px] font-mono px-1.5 py-0.5 rounded font-bold ${
+                      selectedMetrics.includes('latency')
+                        ? 'bg-brand-emerald/10 text-brand-emerald border border-brand-emerald/30'
+                        : 'bg-slate-800 text-slate-400 border border-slate-700'
+                    }`}
+                  >
+                    {selectedMetrics.includes('latency') ? 'ACTIVE' : 'OFF'}
                   </span>
-                </div>
+                </button>
 
-                <div className="p-3 rounded-xl border border-surface-border bg-surface-darkest/60 flex items-center justify-between opacity-60">
+                <div className="p-3 rounded-xl border border-surface-border bg-surface-darkest/60 flex items-center justify-between opacity-50 cursor-not-allowed">
                   <span className="text-xs text-slate-400">Toxicity Detection</span>
                   <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
                     COMING SOON
                   </span>
                 </div>
 
-                <div className="p-3 rounded-xl border border-surface-border bg-surface-darkest/60 flex items-center justify-between opacity-60">
+                <div className="p-3 rounded-xl border border-surface-border bg-surface-darkest/60 flex items-center justify-between opacity-50 cursor-not-allowed">
                   <span className="text-xs text-slate-400">Jailbreak Resistance</span>
                   <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
                     COMING SOON
@@ -261,13 +343,24 @@ export default function NewEvaluationPage() {
             {/* Submit Button */}
             <button
               type="submit"
-              disabled={running || chatbots.length === 0}
-              className="w-full py-3 bg-brand-yellow hover:bg-brand-gold disabled:opacity-50 text-black font-bold text-sm rounded-xl transition-all shadow-glow-yellow flex items-center justify-center gap-2 cursor-pointer"
+              disabled={isSubmitDisabled}
+              title={
+                isHhemActive && isReferenceEmpty
+                  ? "Reference evidence is required for HHEM evaluation"
+                  : !prompt.trim()
+                  ? "Prompt is required"
+                  : ""
+              }
+              className={`w-full py-3 font-bold text-sm rounded-xl transition-all flex items-center justify-center gap-2 ${
+                isSubmitDisabled
+                  ? 'bg-slate-800 text-slate-500 border border-surface-border cursor-not-allowed opacity-60 shadow-none'
+                  : 'bg-brand-yellow hover:bg-brand-gold text-black shadow-glow-yellow cursor-pointer'
+              }`}
             >
               {running ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Calling Chatbot & Running HHEM in RAM...</span>
+                  <span>Calling Chatbot & Running Evaluators in RAM...</span>
                 </>
               ) : (
                 <>
@@ -283,16 +376,16 @@ export default function NewEvaluationPage() {
         <div className="lg:col-span-5 space-y-6">
           {evaluationResult ? (
             <div className="space-y-6">
-              {/* Primary Score Card: HHEM Factual Consistency */}
-              <div className="bg-surface-card border border-surface-border rounded-2xl p-6 shadow-2xl relative overflow-hidden">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <ShieldCheck className="w-5 h-5 text-brand-yellow" />
-                    <span className="text-xs font-mono font-bold uppercase tracking-wider text-slate-300">
-                      Factual Consistency Score
-                    </span>
-                  </div>
-                  {hhemMetric && (
+              {/* Primary Score Card: HHEM Factual Consistency (if HHEM metric is evaluated) */}
+              {hhemMetric && (
+                <div className="bg-surface-card border border-surface-border rounded-2xl p-6 shadow-2xl relative overflow-hidden">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck className="w-5 h-5 text-brand-yellow" />
+                      <span className="text-xs font-mono font-bold uppercase tracking-wider text-slate-300">
+                        Factual Consistency Score
+                      </span>
+                    </div>
                     <span
                       className={`text-[10px] font-mono px-2.5 py-1 rounded-full font-bold uppercase border ${
                         hhemMetric.risk_level === 'low'
@@ -304,51 +397,51 @@ export default function NewEvaluationPage() {
                     >
                       {hhemMetric.risk_level} Hallucination Risk
                     </span>
+                  </div>
+
+                  {/* Score Number Display */}
+                  {hhemMetric.raw_score !== null ? (
+                    <div className="space-y-4">
+                      <div className="flex items-baseline gap-3">
+                        <span className="text-5xl font-black text-white font-mono tracking-tight">
+                          {(hhemMetric.raw_score * 100).toFixed(1)}%
+                        </span>
+                        <span className="text-xs text-slate-400 font-mono">
+                          (Raw: {hhemMetric.raw_score})
+                        </span>
+                      </div>
+
+                      {/* Progress Bar */}
+                      <div className="w-full bg-surface-darkest h-2.5 rounded-full overflow-hidden border border-surface-border">
+                        <div
+                          className={`h-full transition-all duration-700 ${
+                            hhemMetric.risk_level === 'low'
+                              ? 'bg-brand-emerald shadow-glow-yellow'
+                              : hhemMetric.risk_level === 'medium'
+                              ? 'bg-brand-amber'
+                              : 'bg-red-500'
+                          }`}
+                          style={{ width: `${Math.max(5, hhemMetric.raw_score * 100)}%` }}
+                        />
+                      </div>
+
+                      <div className="p-3 rounded-xl bg-surface-darkest border border-surface-border text-xs text-slate-300 leading-relaxed">
+                        <span className="font-semibold text-white block mb-0.5">Model Interpretation:</span>
+                        {hhemMetric.details?.interpretation || 'Factual consistency measured.'}
+                      </div>
+
+                      <div className="text-[10px] text-slate-500 font-mono flex items-center justify-between">
+                        <span>Model: vectara/hallucination_evaluation_model</span>
+                        <span>Device: {hhemMetric.details?.device || 'cpu'}</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-xs text-red-400">
+                      {hhemMetric?.error_message || 'Evaluation could not be completed.'}
+                    </div>
                   )}
                 </div>
-
-                {/* Score Number Display */}
-                {hhemMetric && hhemMetric.raw_score !== null ? (
-                  <div className="space-y-4">
-                    <div className="flex items-baseline gap-3">
-                      <span className="text-5xl font-black text-white font-mono tracking-tight">
-                        {(hhemMetric.raw_score * 100).toFixed(1)}%
-                      </span>
-                      <span className="text-xs text-slate-400 font-mono">
-                        (Raw: {hhemMetric.raw_score})
-                      </span>
-                    </div>
-
-                    {/* Progress Bar */}
-                    <div className="w-full bg-surface-darkest h-2.5 rounded-full overflow-hidden border border-surface-border">
-                      <div
-                        className={`h-full transition-all duration-700 ${
-                          hhemMetric.risk_level === 'low'
-                            ? 'bg-brand-emerald shadow-glow-yellow'
-                            : hhemMetric.risk_level === 'medium'
-                            ? 'bg-brand-amber'
-                            : 'bg-red-500'
-                        }`}
-                        style={{ width: `${Math.max(5, hhemMetric.raw_score * 100)}%` }}
-                      />
-                    </div>
-
-                    <div className="p-3 rounded-xl bg-surface-darkest border border-surface-border text-xs text-slate-300 leading-relaxed">
-                      <span className="font-semibold text-white block mb-0.5">Model Interpretation:</span>
-                      {hhemMetric.details?.interpretation || 'Factual consistency measured.'}
-                    </div>
-
-                    <div className="text-[10px] text-slate-500 font-mono flex items-center justify-between">
-                      <span>Model: vectara/hallucination_evaluation_model</span>
-                      <span>Device: {hhemMetric.details?.device || 'cpu'}</span>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="text-xs text-red-400">
-                    {hhemMetric?.error_message || 'Evaluation could not be completed.'}
-                  </div>
-                )}
-              </div>
+              )}
 
               {/* Chatbot Response Viewer */}
               <div className="bg-surface-card border border-surface-border rounded-2xl p-6 shadow-xl">

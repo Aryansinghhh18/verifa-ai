@@ -31,6 +31,14 @@ async def run_evaluation(
 
     Uses the pre-warmed Vectara HHEM model loaded once during startup to compute real factual consistency scores.
     """
+    # Server-side validation: Reference evidence is required for HHEM evaluation
+    if "hallucination" in request_in.selected_metrics:
+        if not request_in.reference_evidence or not request_in.reference_evidence.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Reference evidence is required for HHEM evaluation.",
+            )
+
     service = EvaluationService(db=db, eval_registry=eval_registry)
     try:
         result = await service.run_evaluation(
@@ -38,6 +46,8 @@ async def run_evaluation(
             request_in=request_in
         )
         return result
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

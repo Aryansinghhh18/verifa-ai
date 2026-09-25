@@ -15,16 +15,49 @@ import {
   Loader2,
   Copy,
   Check,
-  X
+  X,
+  Edit3,
+  Sparkles
 } from 'lucide-react';
+
+const PRESETS = [
+  {
+    id: 'gemini',
+    label: 'Google Gemini',
+    name: 'Gemini 3.5 Flash-Lite',
+    api_endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent',
+    http_method: 'POST',
+    request_template: '{\n  "contents": [\n    {"parts": [{"text": "{{prompt}}"}]}\n  ]\n}',
+    response_json_path: 'candidates[0].content.parts[0].text',
+  },
+  {
+    id: 'groq',
+    label: 'Groq (GPT-OSS)',
+    name: 'Groq (GPT-OSS 120B)',
+    api_endpoint: 'https://api.groq.com/openai/v1/chat/completions',
+    http_method: 'POST',
+    request_template: '{\n  "model": "openai/gpt-oss-120b",\n  "messages": [\n    {"role": "user", "content": "{{prompt}}"}\n  ]\n}',
+    response_json_path: 'choices[0].message.content',
+  },
+  {
+    id: 'openai',
+    label: 'OpenAI GPT-4o',
+    name: 'OpenAI GPT-4o Mini',
+    api_endpoint: 'https://api.openai.com/v1/chat/completions',
+    http_method: 'POST',
+    request_template: '{\n  "model": "gpt-4o-mini",\n  "messages": [\n    {"role": "user", "content": "{{prompt}}"}\n  ]\n}',
+    response_json_path: 'choices[0].message.content',
+  },
+];
 
 export default function ChatbotsPage() {
   const [chatbots, setChatbots] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // Add Modal State
+  // Add / Edit Modal State
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editingBotId, setEditingBotId] = useState(null);
   const [creating, setCreating] = useState(false);
   const [addError, setAddError] = useState('');
   const [formData, setFormData] = useState({
@@ -63,26 +96,66 @@ export default function ChatbotsPage() {
     fetchChatbots();
   }, []);
 
-  const handleCreate = async (e) => {
+  const openAddModal = () => {
+    setEditingBotId(null);
+    setFormData({
+      name: '',
+      api_endpoint: '',
+      api_key: '',
+      http_method: 'POST',
+      request_template: '{\n  "messages": [\n    {"role": "user", "content": "{{prompt}}"}\n  ]\n}',
+      response_json_path: 'choices[0].message.content',
+    });
+    setAddError('');
+    setShowAddModal(true);
+  };
+
+  const openEditModal = (bot) => {
+    setEditingBotId(bot.id);
+    setFormData({
+      name: bot.name,
+      api_endpoint: bot.api_endpoint,
+      api_key: '', // Leave blank to keep existing encrypted key
+      http_method: bot.http_method || 'POST',
+      request_template: bot.request_template,
+      response_json_path: bot.response_json_path,
+    });
+    setAddError('');
+    setShowAddModal(true);
+  };
+
+  const applyPreset = (preset) => {
+    setFormData((prev) => ({
+      ...prev,
+      name: prev.name && prev.name.trim() !== '' ? prev.name : preset.name,
+      api_endpoint: preset.api_endpoint,
+      http_method: preset.http_method,
+      request_template: preset.request_template,
+      response_json_path: preset.response_json_path,
+    }));
+  };
+
+  const handleSave = async (e) => {
     e.preventDefault();
     setAddError('');
     setCreating(true);
 
     try {
-      await api.post('/chatbots/', formData);
+      if (editingBotId) {
+        const payload = { ...formData };
+        if (!payload.api_key || payload.api_key.trim() === '') {
+          delete payload.api_key;
+        }
+        await api.put(`/chatbots/${editingBotId}`, payload);
+      } else {
+        await api.post('/chatbots/', formData);
+      }
       setShowAddModal(false);
-      setFormData({
-        name: '',
-        api_endpoint: '',
-        api_key: '',
-        http_method: 'POST',
-        request_template: '{\n  "messages": [\n    {"role": "user", "content": "{{prompt}}"}\n  ]\n}',
-        response_json_path: 'choices[0].message.content',
-      });
+      setEditingBotId(null);
       fetchChatbots();
     } catch (err) {
-      console.error('Error creating chatbot:', err);
-      setAddError(err.response?.data?.detail || 'Failed to add chatbot. Check endpoint URL and format.');
+      console.error('Error saving chatbot:', err);
+      setAddError(err.response?.data?.detail || 'Failed to save chatbot. Check endpoint URL and format.');
     } finally {
       setCreating(false);
     }
@@ -153,7 +226,7 @@ export default function ChatbotsPage() {
         </div>
 
         <button
-          onClick={() => setShowAddModal(true)}
+          onClick={openAddModal}
           className="px-4 py-2.5 bg-brand-yellow hover:bg-brand-gold text-black font-semibold text-xs rounded-xl transition-all shadow-glow-yellow flex items-center gap-2 cursor-pointer self-start sm:self-auto"
         >
           <Plus className="w-4 h-4" />
@@ -186,7 +259,7 @@ export default function ChatbotsPage() {
             Connect your OpenAI-compatible API, custom self-hosted LLM, or backend agent to evaluate its responses.
           </p>
           <button
-            onClick={() => setShowAddModal(true)}
+            onClick={openAddModal}
             className="px-5 py-2.5 bg-brand-yellow hover:bg-brand-gold text-black font-bold text-xs rounded-xl transition-all shadow-glow-yellow inline-flex items-center gap-2 cursor-pointer"
           >
             <Plus className="w-4 h-4" />
@@ -270,13 +343,21 @@ export default function ChatbotsPage() {
               </div>
 
               {/* Action Buttons */}
-              <div className="pt-4 border-t border-surface-border flex items-center justify-between gap-3">
+              <div className="pt-4 border-t border-surface-border flex items-center justify-between gap-2">
                 <button
                   onClick={() => openTestModal(bot)}
                   className="flex-1 py-2 px-3 bg-surface-elevated hover:bg-surface-hover border border-surface-border hover:border-brand-yellow/40 text-slate-200 hover:text-white text-xs font-semibold rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <Zap className="w-3.5 h-3.5 text-brand-yellow" />
                   <span>Test Connection</span>
+                </button>
+
+                <button
+                  onClick={() => openEditModal(bot)}
+                  title="Edit Chatbot"
+                  className="p-2 rounded-xl text-slate-400 hover:text-brand-yellow hover:bg-surface-hover border border-surface-border transition-colors cursor-pointer"
+                >
+                  <Edit3 className="w-4 h-4" />
                 </button>
 
                 <button
@@ -292,14 +373,14 @@ export default function ChatbotsPage() {
         </div>
       )}
 
-      {/* Add Chatbot Modal */}
+      {/* Add / Edit Chatbot Modal */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-surface-card border border-surface-border rounded-2xl w-full max-w-lg p-6 shadow-2xl overflow-y-auto max-h-[90vh]">
-            <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-bold text-white flex items-center gap-2">
                 <Bot className="w-5 h-5 text-brand-yellow" />
-                <span>Add Chatbot Endpoint</span>
+                <span>{editingBotId ? 'Edit Chatbot Connection' : 'Add Chatbot Endpoint'}</span>
               </h2>
               <button
                 onClick={() => setShowAddModal(false)}
@@ -309,6 +390,28 @@ export default function ChatbotsPage() {
               </button>
             </div>
 
+            {/* Presets Bar */}
+            {!editingBotId && (
+              <div className="mb-4 p-3 bg-surface-darkest/70 border border-surface-border/70 rounded-xl">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-300 mb-2">
+                  <Sparkles className="w-3.5 h-3.5 text-brand-yellow" />
+                  <span>Quick Setup Presets</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {PRESETS.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => applyPreset(p)}
+                      className="px-2.5 py-1 rounded-lg bg-surface-card hover:bg-brand-yellow/10 border border-surface-border hover:border-brand-yellow/50 text-[11px] font-mono text-slate-300 hover:text-brand-yellow transition-all cursor-pointer"
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {addError && (
               <div className="mb-4 p-3 rounded-xl border border-red-500/40 bg-red-500/10 text-red-300 text-xs flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
@@ -316,7 +419,7 @@ export default function ChatbotsPage() {
               </div>
             )}
 
-            <form onSubmit={handleCreate} className="space-y-4">
+            <form onSubmit={handleSave} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1 font-mono uppercase tracking-wider">
                   Chatbot Name *
@@ -354,7 +457,7 @@ export default function ChatbotsPage() {
                 </label>
                 <input
                   type="password"
-                  placeholder="sk-proj-••••••••••••••••"
+                  placeholder={editingBotId ? "Leave blank to keep existing encrypted key" : "sk-proj-•••••••••••••••• / AQ.•••• / gsk_••••"}
                   value={formData.api_key}
                   onChange={(e) => setFormData({ ...formData, api_key: e.target.value })}
                   className="w-full bg-surface-darkest border border-surface-border rounded-xl px-3.5 py-2 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-brand-yellow transition-colors font-mono"
@@ -427,7 +530,7 @@ export default function ChatbotsPage() {
                       <span>Saving...</span>
                     </>
                   ) : (
-                    <span>Save Connection</span>
+                    <span>{editingBotId ? 'Update Connection' : 'Save Connection'}</span>
                   )}
                 </button>
               </div>

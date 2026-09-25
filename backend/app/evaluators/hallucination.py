@@ -86,9 +86,8 @@ class VectaraHallucinationEvaluator(BaseEvaluator):
         reference_evidence: Optional[str] = None,
         **kwargs
     ) -> MetricResult:
-        """Evaluates factual consistency of the chatbot response against reference evidence (or prompt context)."""
-        premise = (reference_evidence.strip() if reference_evidence and reference_evidence.strip() else prompt.strip() if prompt and prompt.strip() else "")
-        if not premise:
+        """Evaluates factual consistency of the chatbot response against reference evidence."""
+        if not reference_evidence or not reference_evidence.strip():
             return MetricResult(
                 metric_type=self.metric_name,
                 label=self.display_label,
@@ -96,9 +95,11 @@ class VectaraHallucinationEvaluator(BaseEvaluator):
                 raw_score=None,
                 normalized_score=None,
                 risk_level="unknown",
-                error_message="Reference evidence or prompt context is strictly required for factual consistency evaluation with HHEM.",
+                error_message="Reference evidence is strictly required for factual consistency evaluation with HHEM.",
                 details={"model_name": self._model_name}
             )
+
+        premise = reference_evidence.strip()
 
         if not chatbot_response or not chatbot_response.strip():
             return MetricResult(

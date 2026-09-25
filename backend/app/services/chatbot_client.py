@@ -144,12 +144,23 @@ class ChatbotClient:
         # Decrypt API key in memory only for request execution (never logged!)
         plain_key = decrypt_api_key(encrypted_api_key) if encrypted_api_key else ""
 
+        # Replace API key placeholders if present in endpoint URL (e.g. ?key=YOUR_API_KEY or ?key={{api_key}})
+        if plain_key:
+            if "YOUR_API_KEY" in endpoint_url:
+                endpoint_url = endpoint_url.replace("YOUR_API_KEY", plain_key)
+            if "{{api_key}}" in endpoint_url:
+                endpoint_url = endpoint_url.replace("{{api_key}}", plain_key)
+
         headers = {
             "Content-Type": "application/json",
             "User-Agent": "VeriFA-AI-Evaluation-Harness/1.0"
         }
         if plain_key:
-            headers["Authorization"] = f"Bearer {plain_key}"
+            # Google APIs (Gemini) use 'x-goog-api-key' instead of 'Authorization: Bearer'
+            if "generativelanguage.googleapis.com" in endpoint_url or "googleapis.com" in endpoint_url:
+                headers["x-goog-api-key"] = plain_key
+            else:
+                headers["Authorization"] = f"Bearer {plain_key}"
 
         if custom_headers:
             headers.update(custom_headers)
