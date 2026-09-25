@@ -38,6 +38,7 @@ api.interceptors.response.use(
       const isPublicAuthPage =
         currentPath === '/login' ||
         currentPath === '/register' ||
+        currentPath === '/signup' ||
         currentPath.startsWith('/auth') ||
         currentPath === '/';
 

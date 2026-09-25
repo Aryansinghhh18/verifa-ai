@@ -25,6 +25,7 @@ export default function App() {
             <Route path="/" element={<LandingPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
+            <Route path="/signup" element={<Navigate to="/register" replace />} />
 
             {/* Protected Dashboard Routes */}
             <Route path="/dashboard" element={<ProtectedRoute />}>
