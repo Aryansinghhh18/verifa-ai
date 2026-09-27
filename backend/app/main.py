@@ -35,6 +35,22 @@ async def lifespan(app: FastAPI):
     await init_db()
     logger.info("Database initialized.")
 
+    # Clean up any stale in-flight TestLab runs from previous server restarts
+    try:
+        from app.models.testlab_run import TestLabRun
+        from app.core.database import async_session_maker
+        from sqlalchemy import update
+        from datetime import datetime, timezone
+        async with async_session_maker() as session:
+            await session.execute(
+                update(TestLabRun)
+                .where(TestLabRun.status.in_(["Running", "Pending"]))
+                .values(status="Interrupted", end_time=datetime.now(timezone.utc))
+            )
+            await session.commit()
+    except Exception as e:
+        logger.debug(f"TestLab run cleanup note: {e}")
+
     # Step 2: Warm up ML models (loaded ONCE and reused across all requests)
     logger.info(f"Warming up Vectara HHEM model '{settings.HHEM_MODEL_NAME}'...")
     try:

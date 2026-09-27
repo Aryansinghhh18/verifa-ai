@@ -1,0 +1,68 @@
+[
+  {
+    "id": "full",
+    "name": "Full Evaluation",
+    "description": "Comprehensive multi-dimensional evaluation combining factual accuracy, safety, instruction adherence, and adversarial resilience.",
+    "categories": ["factual_accuracy", "safety_toxicity", "reasoning_consistency", "instruction_following", "adversarial_robustness"],
+    "total_available_tests": 150,
+    "default_test_count": 100,
+    "min_tests": 10,
+    "max_tests": 150,
+    "badge": "DEFAULT (RECOMMENDED)"
+  },
+  {
+    "id": "hallucination",
+    "name": "Hallucination",
+    "description": "Evaluates factual consistency against verified ground truth evidence using Vectara HHEM and claim verification.",
+    "categories": ["factual_accuracy", "ground_truth_alignment", "world_knowledge"],
+    "total_available_tests": 150,
+    "default_test_count": 100,
+    "min_tests": 10,
+    "max_tests": 150,
+    "badge": "VECTARA HHEM"
+  },
+  {
+    "id": "toxicity",
+    "name": "Toxicity",
+    "description": "Checks for toxic language, hate speech, harassment, bias, and offensive output generation.",
+    "categories": ["hate_speech", "harassment", "profanity", "bias_mitigation"],
+    "total_available_tests": 120,
+    "default_test_count": 100,
+    "min_tests": 10,
+    "max_tests": 120,
+    "badge": "SAFETY"
+  },
+  {
+    "id": "consistency",
+    "name": "Consistency",
+    "description": "Measures semantic stability across paraphrased queries, logical reasoning steps, and deterministic assertions.",
+    "categories": ["paraphrase_stability", "logical_coherence", "numerical_consistency"],
+    "total_available_tests": 120,
+    "default_test_count": 100,
+    "min_tests": 10,
+    "max_tests": 120,
+    "badge": "STABILITY"
+  },
+  {
+    "id": "instruction_following",
+    "name": "Instruction Following",
+    "description": "Tests adherence to complex constraints, JSON/markdown schema formatting, negative constraints, and system prompts.",
+    "categories": ["format_constraints", "negative_constraints", "multistep_rules"],
+    "total_available_tests": 125,
+    "default_test_count": 100,
+    "min_tests": 10,
+    "max_tests": 125,
+    "badge": "COMPLIANCE"
+  },
+  {
+    "id": "adversarial",
+    "name": "Adversarial",
+    "description": "Stress-tests resistance to prompt injection, roleplay jailbreaks, evasion techniques, and safety boundary bypasses.",
+    "categories": ["prompt_injection", "jailbreak_defense", "system_prompt_leakage"],
+    "total_available_tests": 120,
+    "default_test_count": 100,
+    "min_tests": 10,
+    "max_tests": 120,
+    "badge": "SECURITY"
+  }
+]

@@ -14,6 +14,7 @@ import BatchEvaluationPage from './pages/dashboard/BatchEvaluationPage';
 import EvaluationHistoryPage from './pages/dashboard/EvaluationHistoryPage';
 import AnalyticsPage from './pages/dashboard/AnalyticsPage';
 import SettingsPage from './pages/dashboard/SettingsPage';
+import TestLabPage from './pages/dashboard/TestLabPage';
 
 export default function App() {
   return (
@@ -32,6 +33,7 @@ export default function App() {
               <Route element={<DashboardLayout />}>
               <Route index element={<OverviewPage />} />
               <Route path="chatbots" element={<ChatbotsPage />} />
+              <Route path="testlab" element={<TestLabPage />} />
               <Route path="new-eval" element={<NewEvaluationPage />} />
               <Route path="batch" element={<BatchEvaluationPage />} />
               <Route path="history" element={<EvaluationHistoryPage />} />

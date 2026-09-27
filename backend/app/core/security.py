@@ -39,9 +39,12 @@ def decrypt_api_key(encrypted_key: str) -> str:
     """
     if not encrypted_key:
         return ""
-    fernet = _get_fernet()
-    decrypted = fernet.decrypt(encrypted_key.encode("utf-8"))
-    return decrypted.decode("utf-8")
+    try:
+        fernet = _get_fernet()
+        decrypted = fernet.decrypt(encrypted_key.encode("utf-8"))
+        return decrypted.decode("utf-8")
+    except Exception:
+        return encrypted_key
 
 
 def mask_api_key(key: str) -> str:

@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from app.models.chatbot import Chatbot
     from app.models.evaluation import Evaluation
     from app.models.batch_job import BatchJob
+    from app.models.testlab_run import TestLabRun
 
 
 class User(Base):
@@ -40,4 +41,7 @@ class User(Base):
     )
     batch_jobs: Mapped[List["BatchJob"]] = relationship(
         "BatchJob", back_populates="user", cascade="all, delete-orphan"
+    )
+    testlab_runs: Mapped[List["TestLabRun"]] = relationship(
+        "TestLabRun", back_populates="user", cascade="all, delete-orphan"
     )

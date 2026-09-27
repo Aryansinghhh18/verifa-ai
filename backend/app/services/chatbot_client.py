@@ -12,12 +12,13 @@ from app.core.security import decrypt_api_key
 logger = logging.getLogger("verifa.services.chatbot_client")
 
 # Disallowed IP ranges for SSRF mitigation
+CLOUD_METADATA_NETWORK = ipaddress.ip_network("169.254.0.0/16")  # Link-Local / Cloud Metadata (AWS, GCP, Azure, Oracle)
+
 DISALLOWED_NETWORKS = [
     ipaddress.ip_network("127.0.0.0/8"),      # Loopback
     ipaddress.ip_network("10.0.0.0/8"),       # RFC 1918 Private
     ipaddress.ip_network("172.16.0.0/12"),    # RFC 1918 Private
     ipaddress.ip_network("192.168.0.0/16"),   # RFC 1918 Private
-    ipaddress.ip_network("169.254.0.0/16"),   # Link-Local / Cloud Metadata
     ipaddress.ip_network("::1/128"),          # IPv6 Loopback
     ipaddress.ip_network("fc00::/7"),         # IPv6 Unique Local
 ]
@@ -31,7 +32,7 @@ class ChatbotSSRFError(ChatbotClientError):
     pass
 
 
-def validate_endpoint_url(url: str, allow_local: bool = False) -> None:
+def validate_endpoint_url(url: str, allow_local: Optional[bool] = None) -> None:
     """Validates endpoint URL to prevent Server-Side Request Forgery (SSRF)."""
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
@@ -41,17 +42,23 @@ def validate_endpoint_url(url: str, allow_local: bool = False) -> None:
     if not hostname:
         raise ChatbotSSRFError("Invalid URL: missing hostname.")
 
-    if not allow_local:
-        # Check if hostname is an IP literal
-        try:
-            ip = ipaddress.ip_address(hostname)
+    if allow_local is None:
+        allow_local = getattr(settings, "ALLOW_LOCAL_URLS", False)
+
+    try:
+        ip = ipaddress.ip_address(hostname)
+        # Cloud metadata is strictly forbidden under all circumstances
+        if ip in CLOUD_METADATA_NETWORK:
+            raise ChatbotSSRFError(f"Access to link-local/cloud metadata address '{hostname}' is forbidden for security.")
+
+        if not allow_local:
             for disallowed in DISALLOWED_NETWORKS:
                 if ip in disallowed:
                     raise ChatbotSSRFError(f"Access to private/local address '{hostname}' is forbidden for security.")
-        except ValueError:
-            # Hostname is a domain name, disallow explicit 'localhost'
-            if hostname.lower() in ("localhost", "127.0.0.1", "0.0.0.0"):
-                raise ChatbotSSRFError("Access to localhost is forbidden for security.")
+    except ValueError:
+        # Hostname is a domain name
+        if not allow_local and hostname.lower() in ("localhost", "127.0.0.1", "0.0.0.0"):
+            raise ChatbotSSRFError("Access to localhost is forbidden for security.")
 
 
 def extract_json_path(data: Any, path: str) -> str:

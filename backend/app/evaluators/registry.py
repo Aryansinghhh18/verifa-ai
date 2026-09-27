@@ -4,8 +4,8 @@ from typing import Dict, List, Optional
 from app.evaluators.base import BaseEvaluator, MetricResult
 from app.evaluators.hallucination import VectaraHallucinationEvaluator
 from app.evaluators.latency import LatencyEvaluator
+from app.evaluators.toxicity import ToxicityEvaluator
 from app.evaluators.stubs import (
-    ToxicityEvaluator,
     SafetyEvaluator,
     JailbreakEvaluator,
     PromptInjectionEvaluator,

@@ -4,6 +4,7 @@ from app.models.chatbot import Chatbot
 from app.models.evaluation import Evaluation
 from app.models.evaluation_metric import EvaluationMetric
 from app.models.batch_job import BatchJob
+from app.models.testlab_run import TestLabRun
 
 __all__ = [
     "Base",
@@ -12,4 +13,5 @@ __all__ = [
     "Evaluation",
     "EvaluationMetric",
     "BatchJob",
+    "TestLabRun",
 ]

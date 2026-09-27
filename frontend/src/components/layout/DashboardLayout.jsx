@@ -12,7 +12,8 @@ import {
   LogOut,
   ShieldCheck,
   ChevronRight,
-  ExternalLink
+  ExternalLink,
+  FlaskConical
 } from 'lucide-react';
 
 export default function DashboardLayout() {
@@ -27,6 +28,7 @@ export default function DashboardLayout() {
   const navItems = [
     { label: 'Overview', to: '/dashboard', icon: LayoutDashboard, exact: true },
     { label: 'Chatbot Connections', to: '/dashboard/chatbots', icon: Bot },
+    { label: 'TestLab', to: '/dashboard/testlab', icon: FlaskConical, badge: 'NEW' },
     { label: 'New Evaluation', to: '/dashboard/new-eval', icon: PlayCircle },
     { label: 'Batch Evaluation', to: '/dashboard/batch', icon: FileSpreadsheet },
     { label: 'Evaluation History', to: '/dashboard/history', icon: History },

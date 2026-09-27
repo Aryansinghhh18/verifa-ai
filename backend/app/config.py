@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     ]
     REQUEST_TIMEOUT_SECONDS: int = 30
     MAX_RESPONSE_SIZE_BYTES: int = 5 * 1024 * 1024  # 5MB
+    ALLOW_LOCAL_URLS: bool = False
 
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
