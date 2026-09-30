@@ -20,7 +20,10 @@ import {
   XCircle,
   Layers,
   ArrowUpDown,
-  RefreshCw
+  RefreshCw,
+  Trash2,
+  AlertTriangle,
+  X
 } from 'lucide-react';
 
 export default function EvaluationHistoryPage() {
@@ -37,7 +40,7 @@ export default function EvaluationHistoryPage() {
   // Filters & State
   const [search, setSearch] = useState('');
   const [selectedChatbotId, setSelectedChatbotId] = useState('');
-  const [evaluationType, setEvaluationType] = useState('all'); // all, single, batch
+  const [evaluationType, setEvaluationType] = useState('all'); // all, single, batch, testlab
   const [sortBy, setSortBy] = useState('date_desc');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -48,6 +51,84 @@ export default function EvaluationHistoryPage() {
   // Active Report Modal
   const [selectedEvaluation, setSelectedEvaluation] = useState(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+
+  // Delete State
+  const [itemToDelete, setItemToDelete] = useState(null);
+  const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [notification, setNotification] = useState(null);
+
+  const showNotification = (type, message) => {
+    setNotification({ type, message });
+    setTimeout(() => {
+      setNotification((prev) => (prev?.message === message ? null : prev));
+    }, 4500);
+  };
+
+  const handleDeleteItemClick = (e, item) => {
+    e.stopPropagation();
+    setItemToDelete(item);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!itemToDelete) return;
+    try {
+      setIsDeleting(true);
+      await api.delete(`/evaluations/${itemToDelete.id}`);
+
+      setHistoryData((prev) => {
+        const nextItems = prev.items.filter((it) => it.id !== itemToDelete.id);
+        const newTotal = Math.max(0, prev.total_count - 1);
+        const newPages = Math.max(1, Math.ceil(newTotal / prev.page_size));
+        return {
+          ...prev,
+          items: nextItems,
+          total_count: newTotal,
+          total_pages: newPages,
+        };
+      });
+
+      if (historyData.items.length === 1 && page > 1) {
+        setPage((p) => p - 1);
+      }
+
+      showNotification('success', 'Evaluation deleted successfully.');
+      setItemToDelete(null);
+    } catch (err) {
+      console.error('Failed to delete evaluation:', err);
+      const msg = err.response?.data?.detail || 'Failed to delete evaluation. Please try again.';
+      showNotification('error', msg);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleConfirmDeleteAll = async () => {
+    try {
+      setIsDeleting(true);
+      const params = {};
+      if (evaluationType !== 'all') params.evaluation_type = evaluationType;
+      await api.delete('/evaluations/', { params });
+
+      setHistoryData({
+        total_count: 0,
+        page: 1,
+        page_size: pageSize,
+        total_pages: 1,
+        items: [],
+      });
+      setPage(1);
+
+      showNotification('success', 'All evaluation history has been deleted.');
+      setShowDeleteAllModal(false);
+    } catch (err) {
+      console.error('Failed to delete all evaluations:', err);
+      const msg = err.response?.data?.detail || 'Failed to delete evaluation history. Please try again.';
+      showNotification('error', msg);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   useEffect(() => {
     fetchChatbots();
@@ -150,6 +231,15 @@ export default function EvaluationHistoryPage() {
             {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5 text-brand-yellow" />}
             <span>Export CSV</span>
           </button>
+          <button
+            onClick={() => setShowDeleteAllModal(true)}
+            disabled={historyData.total_count === 0 || isDeleting}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 text-xs font-semibold text-red-400 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Delete All Evaluation History"
+          >
+            <Trash2 className="w-3.5 h-3.5 text-red-400" />
+            <span>Delete All History</span>
+          </button>
           <Link
             to="/dashboard/new-eval"
             className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-brand-yellow hover:bg-yellow-400 text-black text-xs font-bold transition-all shadow-glow-yellow"
@@ -159,6 +249,33 @@ export default function EvaluationHistoryPage() {
           </Link>
         </div>
       </div>
+
+      {/* Action Notification Banner */}
+      {notification && (
+        <div
+          className={`p-3.5 rounded-xl border flex items-center justify-between text-xs font-medium transition-all ${
+            notification.type === 'success'
+              ? 'bg-brand-emerald/10 border-brand-emerald/30 text-brand-emerald'
+              : 'bg-red-500/10 border-red-500/30 text-red-400'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {notification.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+            ) : (
+              <AlertCircle className="w-4 h-4 shrink-0" />
+            )}
+            <span>{notification.message}</span>
+          </div>
+          <button
+            onClick={() => setNotification(null)}
+            className="p-1 hover:opacity-75 transition-opacity"
+            title="Dismiss notification"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Filter and Search Bar Card */}
       <div className="rounded-2xl border border-surface-border bg-surface-card/40 p-4 space-y-3">
@@ -207,9 +324,10 @@ export default function EvaluationHistoryPage() {
               }}
               className="w-full bg-surface-darkest border border-surface-border rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-brand-yellow"
             >
-              <option value="all">All Types (Single & Batch)</option>
+              <option value="all">All Types (Single, Batch & TestLab)</option>
               <option value="single">Single Evaluation Only</option>
               <option value="batch">Batch CSV Only</option>
+              <option value="testlab">TestLab Benchmark Only</option>
             </select>
           </div>
 
@@ -279,7 +397,7 @@ export default function EvaluationHistoryPage() {
                   <th className="py-3 px-4 w-28">Risk Level</th>
                   <th className="py-3 px-4 w-20">Latency</th>
                   <th className="py-3 px-4 w-28">Date</th>
-                  <th className="py-3 px-4 w-20 text-right">Action</th>
+                  <th className="py-3 px-4 w-24 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-surface-border text-slate-300">
@@ -293,9 +411,15 @@ export default function EvaluationHistoryPage() {
                       {item.chatbot_name}
                     </td>
                     <td className="py-3 px-4">
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-surface-elevated text-slate-400 border border-surface-border uppercase">
-                        {item.evaluation_type}
-                      </span>
+                      {item.evaluation_type === 'testlab' ? (
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 uppercase font-semibold">
+                          TestLab
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-surface-elevated text-slate-400 border border-surface-border uppercase">
+                          {item.evaluation_type}
+                        </span>
+                      )}
                     </td>
                     <td className="py-3 px-4 text-slate-300 font-medium truncate max-w-[220px]" title={item.prompt}>
                       {item.prompt}
@@ -344,16 +468,25 @@ export default function EvaluationHistoryPage() {
                       {new Date(item.created_at).toLocaleDateString()}
                     </td>
                     <td className="py-3 px-4 text-right">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleOpenReport(item.id);
-                        }}
-                        className="p-1.5 rounded-lg border border-surface-border bg-surface-dark hover:bg-surface-elevated text-slate-300 hover:text-white transition-colors"
-                        title="View Full Report"
-                      >
-                        <Eye className="w-3.5 h-3.5" />
-                      </button>
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenReport(item.id);
+                          }}
+                          className="p-1.5 rounded-lg border border-surface-border bg-surface-dark hover:bg-surface-elevated text-slate-300 hover:text-white transition-colors cursor-pointer"
+                          title="View Full Report"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={(e) => handleDeleteItemClick(e, item)}
+                          className="p-1.5 rounded-lg border border-surface-border hover:border-red-500/40 bg-surface-dark hover:bg-red-500/10 text-slate-400 hover:text-red-400 transition-colors cursor-pointer"
+                          title="Delete Evaluation"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -413,6 +546,110 @@ export default function EvaluationHistoryPage() {
           </div>
         )}
       </div>
+
+      {/* Confirmation Modal: Delete Single Evaluation */}
+      {itemToDelete && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-surface-card border border-surface-border rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-400 shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-base font-bold text-white">Delete this evaluation?</h3>
+                <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                  This evaluation and its stored results will be permanently removed from your evaluation history.
+                </p>
+                <div className="mt-3 p-2.5 rounded-lg bg-surface-darkest border border-surface-border font-mono text-[11px] text-slate-300 space-y-1">
+                  <div className="truncate"><span className="text-slate-500">Chatbot:</span> {itemToDelete.chatbot_name}</div>
+                  <div className="truncate text-slate-400"><span className="text-slate-500">Prompt:</span> {itemToDelete.prompt}</div>
+                  <div className="text-[10px] text-slate-500">ID: #{itemToDelete.id.substring(0, 8)}</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-surface-border">
+              <button
+                type="button"
+                onClick={() => setItemToDelete(null)}
+                disabled={isDeleting}
+                className="px-4 py-2 rounded-xl border border-surface-border bg-surface-dark hover:bg-surface-elevated text-xs font-semibold text-slate-300 transition-colors disabled:opacity-50 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                disabled={isDeleting}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-colors disabled:opacity-50 shadow-lg shadow-red-900/20 cursor-pointer"
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal: Delete All Evaluation History */}
+      {showDeleteAllModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-surface-card border border-surface-border rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-400 shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-base font-bold text-white">Delete all evaluation history?</h3>
+                <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                  This will permanently delete all of your saved evaluation records and results. This action cannot be undone.
+                </p>
+                <div className="mt-3 p-2.5 rounded-lg bg-red-500/10 border border-red-500/20 text-[11px] text-red-300 font-mono">
+                  {historyData.total_count} total evaluation {historyData.total_count === 1 ? 'record' : 'records'} will be removed permanently.
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-surface-border">
+              <button
+                type="button"
+                onClick={() => setShowDeleteAllModal(false)}
+                disabled={isDeleting}
+                className="px-4 py-2 rounded-xl border border-surface-border bg-surface-dark hover:bg-surface-elevated text-xs font-semibold text-slate-300 transition-colors disabled:opacity-50 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteAll}
+                disabled={isDeleting}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-colors disabled:opacity-50 shadow-lg shadow-red-900/20 cursor-pointer"
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Deleting All...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete All History</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Detailed Evaluation Report Modal */}
       {selectedEvaluation && (

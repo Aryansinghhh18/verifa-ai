@@ -38,6 +38,9 @@ import {
   Copy,
   Download,
   FileText,
+  Trash2,
+  Loader2,
+  X,
 } from 'lucide-react';
 import api from '../../api/client';
 import {
@@ -52,6 +55,8 @@ import {
   downloadReportPdf,
   downloadReportCsv,
   downloadReportJson,
+  deleteTestRun,
+  deleteAllTestRuns,
 } from '../../api/testlab';
 
 export default function TestLabPage() {
@@ -95,6 +100,50 @@ export default function TestLabPage() {
   // Run History state
   const [historyRuns, setHistoryRuns] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [runToDelete, setRunToDelete] = useState(null);
+  const [showDeleteAllRunsModal, setShowDeleteAllRunsModal] = useState(false);
+  const [deletingRun, setDeletingRun] = useState(false);
+  const [testLabNotification, setTestLabNotification] = useState(null);
+
+  const showTestLabNotification = (type, message) => {
+    setTestLabNotification({ type, message });
+    setTimeout(() => {
+      setTestLabNotification((prev) => (prev?.message === message ? null : prev));
+    }, 4500);
+  };
+
+  const handleConfirmDeleteRun = async () => {
+    if (!runToDelete) return;
+    try {
+      setDeletingRun(true);
+      await deleteTestRun(runToDelete.id);
+      setHistoryRuns((prev) => prev.filter((r) => r.id !== runToDelete.id));
+      showTestLabNotification('success', 'TestLab run deleted successfully.');
+      setRunToDelete(null);
+    } catch (err) {
+      console.error('Failed to delete TestLab run:', err);
+      const msg = err.response?.data?.detail || 'Failed to delete TestLab run.';
+      showTestLabNotification('error', msg);
+    } finally {
+      setDeletingRun(false);
+    }
+  };
+
+  const handleConfirmDeleteAllRuns = async () => {
+    try {
+      setDeletingRun(true);
+      await deleteAllTestRuns();
+      setHistoryRuns([]);
+      showTestLabNotification('success', 'All TestLab runs deleted successfully.');
+      setShowDeleteAllRunsModal(false);
+    } catch (err) {
+      console.error('Failed to delete all TestLab runs:', err);
+      const msg = err.response?.data?.detail || 'Failed to clear TestLab history.';
+      showTestLabNotification('error', msg);
+    } finally {
+      setDeletingRun(false);
+    }
+  };
 
   // Results Dashboard Filters State (Phase 4)
   const [filterCategory, setFilterCategory] = useState('ALL');
@@ -1715,11 +1764,47 @@ export default function TestLabPage() {
                   <RefreshCw className={`w-3.5 h-3.5 ${loadingHistory ? 'animate-spin' : ''}`} />
                   <span>Refresh</span>
                 </button>
+                <button
+                  onClick={() => setShowDeleteAllRunsModal(true)}
+                  disabled={historyRuns.length === 0 || deletingRun}
+                  className="px-3 py-1.5 rounded-lg border border-red-500/30 hover:border-red-500/50 bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-mono flex items-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="Clear All TestLab History"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                  <span>Clear History</span>
+                </button>
                 <span className="text-[11px] font-mono px-3 py-1 rounded-xl bg-surface-darkest border border-surface-border text-slate-400">
                   Total Runs: {historyRuns.length}
                 </span>
               </div>
             </div>
+
+            {/* Action Notification Banner */}
+            {testLabNotification && (
+              <div
+                className={`mb-4 p-3.5 rounded-xl border flex items-center justify-between text-xs font-medium transition-all ${
+                  testLabNotification.type === 'success'
+                    ? 'bg-brand-emerald/10 border-brand-emerald/30 text-brand-emerald'
+                    : 'bg-red-500/10 border-red-500/30 text-red-400'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  {testLabNotification.type === 'success' ? (
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  ) : (
+                    <AlertTriangle className="w-4 h-4 shrink-0" />
+                  )}
+                  <span>{testLabNotification.message}</span>
+                </div>
+                <button
+                  onClick={() => setTestLabNotification(null)}
+                  className="p-1 hover:opacity-75 transition-opacity cursor-pointer"
+                  title="Dismiss notification"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
 
             {loadingHistory ? (
               <div className="p-12 text-center text-xs font-mono text-slate-500">
@@ -1809,6 +1894,14 @@ export default function TestLabPage() {
                               <span>View Results</span>
                               <ChevronRight className="w-3.5 h-3.5" />
                             </button>
+                            <button
+                              onClick={() => setRunToDelete(r)}
+                              disabled={deletingRun}
+                              className="p-1.5 rounded-lg bg-surface-elevated hover:bg-red-500/10 text-slate-400 hover:text-red-400 border border-surface-border hover:border-red-500/30 text-xs transition-colors cursor-pointer"
+                              title="Delete TestLab Run"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -1817,6 +1910,110 @@ export default function TestLabPage() {
                 </table>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal: Delete Single TestLab Run */}
+      {runToDelete && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-surface-card border border-surface-border rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-400 shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-base font-bold text-white">Delete this TestLab run?</h3>
+                <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                  This TestLab benchmark run, test cases, and generated telemetry will be permanently removed.
+                </p>
+                <div className="mt-3 p-2.5 rounded-lg bg-surface-darkest border border-surface-border font-mono text-[11px] text-slate-300 space-y-1">
+                  <div className="truncate"><span className="text-slate-500">Run ID:</span> #{runToDelete.id.substring(0, 8)}</div>
+                  <div className="truncate"><span className="text-slate-500">Chatbot:</span> {runToDelete.chatbot_name}</div>
+                  <div className="text-[10px] text-slate-500">Suite: {runToDelete.test_suite} ({runToDelete.total_tests} tests)</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-surface-border">
+              <button
+                type="button"
+                onClick={() => setRunToDelete(null)}
+                disabled={deletingRun}
+                className="px-4 py-2 rounded-xl border border-surface-border bg-surface-dark hover:bg-surface-elevated text-xs font-semibold text-slate-300 transition-colors disabled:opacity-50 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteRun}
+                disabled={deletingRun}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-colors disabled:opacity-50 shadow-lg shadow-red-900/20 cursor-pointer"
+              >
+                {deletingRun ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete Run</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal: Delete All TestLab History */}
+      {showDeleteAllRunsModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-surface-card border border-surface-border rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-400 shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-base font-bold text-white">Clear all TestLab history?</h3>
+                <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                  This will permanently delete all {historyRuns.length} recorded TestLab benchmark runs and evaluations. This action cannot be undone.
+                </p>
+                <div className="mt-3 p-2.5 rounded-lg bg-red-500/10 border border-red-500/20 text-[11px] text-red-300 font-mono">
+                  {historyRuns.length} benchmark {historyRuns.length === 1 ? 'run' : 'runs'} will be removed permanently.
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-surface-border">
+              <button
+                type="button"
+                onClick={() => setShowDeleteAllRunsModal(false)}
+                disabled={deletingRun}
+                className="px-4 py-2 rounded-xl border border-surface-border bg-surface-dark hover:bg-surface-elevated text-xs font-semibold text-slate-300 transition-colors disabled:opacity-50 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteAllRuns}
+                disabled={deletingRun}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-colors disabled:opacity-50 shadow-lg shadow-red-900/20 cursor-pointer"
+              >
+                {deletingRun ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Deleting All...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Clear All Runs</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

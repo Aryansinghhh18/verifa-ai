@@ -4,7 +4,7 @@ import json
 import logging
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -438,3 +438,50 @@ async def download_report_json(
             "Content-Disposition": f'attachment; filename="{filename}"'
         }
     )
+
+
+@router.delete("/runs/{run_id}", status_code=status.HTTP_200_OK)
+async def delete_test_run(
+    run_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Permanently deletes a TestLab run record strictly owned by the authenticated user."""
+    stmt = select(TestLabRun).where(TestLabRun.id == run_id)
+    result = await db.execute(stmt)
+    run = result.scalar_one_or_none()
+    if not run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"TestLab run '{run_id}' not found."
+        )
+    if run.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to delete this TestLab run."
+        )
+
+    await db.delete(run)
+    await db.commit()
+    return {
+        "success": True,
+        "message": "TestLab run deleted successfully.",
+        "run_id": run_id,
+    }
+
+
+@router.delete("/runs", status_code=status.HTTP_200_OK)
+async def delete_all_test_runs(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Permanently deletes all TestLab runs for the authenticated user."""
+    stmt = delete(TestLabRun).where(TestLabRun.user_id == current_user.id)
+    result = await db.execute(stmt)
+    await db.commit()
+    return {
+        "success": True,
+        "message": "All TestLab runs deleted successfully.",
+        "deleted_count": result.rowcount or 0,
+    }
+

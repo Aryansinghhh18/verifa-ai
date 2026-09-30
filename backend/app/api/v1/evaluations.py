@@ -65,7 +65,7 @@ async def run_evaluation(
 async def get_evaluation_history(
     search: Optional[str] = None,
     chatbot_id: Optional[str] = None,
-    evaluation_type: Optional[str] = Query(default=None, pattern="^(all|single|batch)$"),
+    evaluation_type: Optional[str] = Query(default=None, pattern="^(all|single|batch|testlab)$"),
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
     sort_by: str = Query(default="date_desc", pattern="^(date_desc|date_asc|score_desc|score_asc|latency_desc|latency_asc)$"),
@@ -94,7 +94,7 @@ async def get_evaluation_history(
 @router.get("/export")
 async def export_evaluations_csv(
     chatbot_id: Optional[str] = None,
-    evaluation_type: Optional[str] = Query(default=None, pattern="^(all|single|batch)$"),
+    evaluation_type: Optional[str] = Query(default=None, pattern="^(all|single|batch|testlab)$"),
     current_user: User = Depends(get_current_user),
     eval_registry: EvaluationRegistry = Depends(get_eval_registry),
     db: AsyncSession = Depends(get_db),
@@ -151,3 +151,66 @@ async def get_evaluation(
             detail="Evaluation record not found.",
         )
     return result
+
+
+@router.delete("/{evaluation_id}", status_code=status.HTTP_200_OK)
+async def delete_evaluation(
+    evaluation_id: str,
+    current_user: User = Depends(get_current_user),
+    eval_registry: EvaluationRegistry = Depends(get_eval_registry),
+    db: AsyncSession = Depends(get_db),
+):
+    """Permanently deletes a single evaluation record owned by the authenticated user.
+    
+    Supports Single Prompt, Batch, and TestLab evaluations.
+    """
+    service = EvaluationService(db=db, eval_registry=eval_registry)
+    try:
+        await service.delete_evaluation(
+            user_id=current_user.id,
+            evaluation_id=evaluation_id,
+        )
+        return {
+            "success": True,
+            "message": "Evaluation deleted successfully.",
+            "evaluation_id": evaluation_id,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting evaluation {evaluation_id}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete evaluation: {str(e)}",
+        )
+
+
+@router.delete("/", status_code=status.HTTP_200_OK)
+async def delete_all_evaluations(
+    evaluation_type: Optional[str] = Query(default=None, pattern="^(all|single|batch|testlab)$"),
+    current_user: User = Depends(get_current_user),
+    eval_registry: EvaluationRegistry = Depends(get_eval_registry),
+    db: AsyncSession = Depends(get_db),
+):
+    """Permanently deletes all evaluation records owned by the authenticated user."""
+    service = EvaluationService(db=db, eval_registry=eval_registry)
+    clean_type = None if evaluation_type == "all" else evaluation_type
+    try:
+        count = await service.delete_all_evaluations(
+            user_id=current_user.id,
+            evaluation_type=clean_type,
+        )
+        return {
+            "success": True,
+            "message": "All evaluations deleted successfully.",
+            "deleted_count": count,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error bulk deleting evaluations for user {current_user.id}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete evaluation history: {str(e)}",
+        )
+

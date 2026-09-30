@@ -5,7 +5,8 @@ import json
 import logging
 import math
 from typing import List, Optional
-from sqlalchemy import select, func, or_
+from fastapi import HTTPException, status
+from sqlalchemy import select, func, or_, delete
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -187,7 +188,70 @@ class EvaluationService:
         res = await self.db.execute(stmt)
         evaluation = res.scalar_one_or_none()
         if not evaluation:
-            return None
+            from app.models.testlab_run import TestLabRun
+            tl_stmt = select(TestLabRun).where(
+                TestLabRun.id == evaluation_id,
+                TestLabRun.user_id == user_id
+            )
+            tl_res = await self.db.execute(tl_stmt)
+            tl_run = tl_res.scalar_one_or_none()
+            if not tl_run:
+                return None
+
+            summary_metrics = {}
+            if tl_run.summary_metrics_json:
+                try:
+                    summary_metrics = json.loads(tl_run.summary_metrics_json)
+                except Exception:
+                    pass
+
+            metric_items = []
+            hl_rate = summary_metrics.get("potential_hallucination_rate")
+            if hl_rate is not None:
+                c_score = round(max(0.0, 1.0 - (float(hl_rate) / 100.0)), 4)
+                metric_items.append(
+                    MetricResultItem(
+                        metric_type="hallucination",
+                        label="Factual Consistency & Hallucination",
+                        status="evaluated",
+                        raw_score=c_score,
+                        normalized_score=c_score,
+                        risk_level="high" if float(hl_rate) > 30 else ("medium" if float(hl_rate) > 10 else "low"),
+                        details={"potential_hallucination_rate": hl_rate}
+                    )
+                )
+
+            tox_rate = summary_metrics.get("toxicity_rate")
+            if tox_rate is not None:
+                t_score = round(float(tox_rate) / 100.0, 4)
+                metric_items.append(
+                    MetricResultItem(
+                        metric_type="toxicity",
+                        label="Toxicity & Content Safety",
+                        status="evaluated",
+                        raw_score=t_score,
+                        normalized_score=t_score,
+                        risk_level="high" if float(tox_rate) > 20 else ("medium" if float(tox_rate) > 5 else "low"),
+                        details={"toxicity_rate": tox_rate}
+                    )
+                )
+
+            return EvaluationDetailResponse(
+                id=tl_run.id,
+                chatbot_id=tl_run.chatbot_id,
+                chatbot_name=tl_run.chatbot_name,
+                batch_job_id=None,
+                evaluation_type="testlab",
+                prompt=f"TestLab Benchmark Suite: {tl_run.test_suite.upper()} ({tl_run.completed_tests}/{tl_run.total_tests} tests)",
+                reference_evidence=f"Benchmark Suite: {tl_run.test_suite.upper()}",
+                chatbot_response=f"Status: {tl_run.status} | Passed: {tl_run.passed_tests} | Potential Issues: {tl_run.potential_issue_tests} | Errors: {tl_run.failed_tests}",
+                status_code=200 if tl_run.status == "Completed" else 500,
+                response_latency_ms=(tl_run.duration_seconds or 0.0) * 1000.0,
+                status="success" if tl_run.status == "Completed" else "error",
+                error_message=None if tl_run.status == "Completed" else f"Run ended with status: {tl_run.status}",
+                created_at=tl_run.created_at,
+                metrics=metric_items
+            )
 
         metric_items = []
         for m in evaluation.metrics:
@@ -289,104 +353,162 @@ class EvaluationService:
         page: int = 1,
         page_size: int = 20,
     ) -> EvaluationHistoryResponse:
-        """Filters, sorts, and paginates evaluation history records strictly for the current user."""
-        conditions = [Evaluation.user_id == user_id]
+        """Filters, sorts, and paginates evaluation history records strictly for the current user.
 
-        if chatbot_id and chatbot_id.strip():
-            conditions.append(Evaluation.chatbot_id == chatbot_id.strip())
+        Supports Single Prompt ('single'), Batch CSV ('batch'), TestLab Benchmark ('testlab'), or All ('all' / None).
+        """
+        eval_items: List[EvaluationHistoryItem] = []
+        clean_type = (evaluation_type or "all").lower().strip()
 
-        if evaluation_type == "single":
-            conditions.append(Evaluation.batch_job_id.is_(None))
-        elif evaluation_type == "batch":
-            conditions.append(Evaluation.batch_job_id.is_not(None))
+        # 1. Fetch from evaluations table (if single, batch, or all)
+        if clean_type in ("all", "single", "batch"):
+            conditions = [Evaluation.user_id == user_id]
 
-        if search and search.strip():
-            term = f"%{search.strip()}%"
-            conditions.append(
-                or_(
-                    Evaluation.prompt.ilike(term),
-                    Evaluation.chatbot_response.ilike(term),
+            if chatbot_id and chatbot_id.strip():
+                conditions.append(Evaluation.chatbot_id == chatbot_id.strip())
+
+            if clean_type == "single":
+                conditions.append(Evaluation.batch_job_id.is_(None))
+            elif clean_type == "batch":
+                conditions.append(Evaluation.batch_job_id.is_not(None))
+
+            if search and search.strip():
+                term = f"%{search.strip()}%"
+                conditions.append(
+                    or_(
+                        Evaluation.prompt.ilike(term),
+                        Evaluation.chatbot_response.ilike(term),
+                    )
                 )
+
+            if start_date:
+                conditions.append(Evaluation.created_at >= start_date)
+            if end_date:
+                conditions.append(Evaluation.created_at <= end_date)
+
+            stmt = (
+                select(Evaluation)
+                .options(
+                    selectinload(Evaluation.metrics),
+                    selectinload(Evaluation.chatbot)
+                )
+                .where(*conditions)
             )
 
-        if start_date:
-            conditions.append(Evaluation.created_at >= start_date)
-        if end_date:
-            conditions.append(Evaluation.created_at <= end_date)
+            res = await self.db.execute(stmt)
+            records = list(res.scalars().all())
 
-        # Count total matches
-        count_stmt = select(func.count(Evaluation.id)).where(*conditions)
-        total_count = (await self.db.execute(count_stmt)).scalar() or 0
+            for ev in records:
+                h_metric = next((m for m in ev.metrics if m.metric_type == "hallucination"), None)
+                h_score = h_metric.raw_score if h_metric else None
+                h_risk = h_metric.risk_level if h_metric else "unknown"
+                bot_name = ev.chatbot.name if ev.chatbot else ("Batch CSV Job" if ev.batch_job_id else "Direct Benchmark")
+                ev_type = "batch" if ev.batch_job_id else "single"
 
-        # Query items
-        stmt = (
-            select(Evaluation)
-            .options(
-                selectinload(Evaluation.metrics),
-                selectinload(Evaluation.chatbot)
-            )
-            .where(*conditions)
-        )
+                eval_items.append(
+                    EvaluationHistoryItem(
+                        id=ev.id,
+                        chatbot_id=ev.chatbot_id,
+                        chatbot_name=bot_name,
+                        batch_job_id=ev.batch_job_id,
+                        evaluation_type=ev_type,
+                        prompt=ev.prompt,
+                        chatbot_response=ev.chatbot_response,
+                        reference_evidence=ev.reference_evidence,
+                        hallucination_score=h_score,
+                        risk_level=h_risk,
+                        response_latency_ms=ev.response_latency_ms,
+                        status=ev.status,
+                        created_at=ev.created_at
+                    )
+                )
 
+        # 2. Fetch from testlab_runs table (if testlab or all)
+        tl_items: List[EvaluationHistoryItem] = []
+        if clean_type in ("all", "testlab"):
+            from app.models.testlab_run import TestLabRun
+            tl_conditions = [TestLabRun.user_id == user_id]
+
+            if chatbot_id and chatbot_id.strip():
+                tl_conditions.append(TestLabRun.chatbot_id == chatbot_id.strip())
+
+            if search and search.strip():
+                term = f"%{search.strip()}%"
+                tl_conditions.append(
+                    or_(
+                        TestLabRun.chatbot_name.ilike(term),
+                        TestLabRun.test_suite.ilike(term),
+                    )
+                )
+
+            if start_date:
+                tl_conditions.append(TestLabRun.created_at >= start_date)
+            if end_date:
+                tl_conditions.append(TestLabRun.created_at <= end_date)
+
+            tl_stmt = select(TestLabRun).where(*tl_conditions)
+            tl_res = await self.db.execute(tl_stmt)
+            tl_runs = list(tl_res.scalars().all())
+
+            for tl in tl_runs:
+                hl_score = None
+                if tl.summary_metrics_json:
+                    try:
+                        sm = json.loads(tl.summary_metrics_json)
+                        if "potential_hallucination_rate" in sm and sm["potential_hallucination_rate"] is not None:
+                            hl_score = round(max(0.0, 1.0 - (float(sm["potential_hallucination_rate"]) / 100.0)), 4)
+                    except Exception:
+                        pass
+
+                risk = "high" if (tl.potential_issue_tests > 0 or tl.failed_tests > 0) else "low"
+                status_str = "success" if tl.status == "Completed" else "error"
+                duration_ms = (tl.duration_seconds or 0.0) * 1000.0
+
+                tl_items.append(
+                    EvaluationHistoryItem(
+                        id=tl.id,
+                        chatbot_id=tl.chatbot_id,
+                        chatbot_name=tl.chatbot_name,
+                        batch_job_id=None,
+                        evaluation_type="testlab",
+                        prompt=f"TestLab Suite: {tl.test_suite.upper()} ({tl.completed_tests}/{tl.total_tests} tests)",
+                        chatbot_response=f"Status: {tl.status} | Passed: {tl.passed_tests} | Potential Issues: {tl.potential_issue_tests} | Errors: {tl.failed_tests}",
+                        reference_evidence=f"Duration: {tl.duration_seconds}s",
+                        hallucination_score=hl_score,
+                        risk_level=risk,
+                        response_latency_ms=duration_ms,
+                        status=status_str,
+                        created_at=tl.created_at
+                    )
+                )
+
+        all_items = eval_items + tl_items
+
+        # Sorting
         if sort_by == "date_asc":
-            stmt = stmt.order_by(Evaluation.created_at.asc())
+            all_items.sort(key=lambda x: x.created_at)
         elif sort_by == "latency_desc":
-            stmt = stmt.order_by(Evaluation.response_latency_ms.desc())
+            all_items.sort(key=lambda x: x.response_latency_ms, reverse=True)
         elif sort_by == "latency_asc":
-            stmt = stmt.order_by(Evaluation.response_latency_ms.asc())
-        else:
-            stmt = stmt.order_by(Evaluation.created_at.desc())
-
-        if sort_by not in ("score_desc", "score_asc"):
-            offset = max(0, (page - 1) * page_size)
-            stmt = stmt.limit(page_size).offset(offset)
-
-        res = await self.db.execute(stmt)
-        records = list(res.scalars().all())
-
-        items: List[EvaluationHistoryItem] = []
-        for ev in records:
-            h_metric = next((m for m in ev.metrics if m.metric_type == "hallucination"), None)
-            h_score = h_metric.raw_score if h_metric else None
-            h_risk = h_metric.risk_level if h_metric else "unknown"
-            bot_name = ev.chatbot.name if ev.chatbot else ("Batch CSV Job" if ev.batch_job_id else "Direct Benchmark")
-            eval_type = "batch" if ev.batch_job_id else "single"
-
-            items.append(
-                EvaluationHistoryItem(
-                    id=ev.id,
-                    chatbot_id=ev.chatbot_id,
-                    chatbot_name=bot_name,
-                    batch_job_id=ev.batch_job_id,
-                    evaluation_type=eval_type,
-                    prompt=ev.prompt,
-                    chatbot_response=ev.chatbot_response,
-                    reference_evidence=ev.reference_evidence,
-                    hallucination_score=h_score,
-                    risk_level=h_risk,
-                    response_latency_ms=ev.response_latency_ms,
-                    status=ev.status,
-                    created_at=ev.created_at
-                )
-            )
-
-        if sort_by == "score_desc":
-            items.sort(key=lambda x: (x.hallucination_score if x.hallucination_score is not None else -1.0), reverse=True)
-            offset = max(0, (page - 1) * page_size)
-            items = items[offset:offset + page_size]
+            all_items.sort(key=lambda x: x.response_latency_ms)
+        elif sort_by == "score_desc":
+            all_items.sort(key=lambda x: (x.hallucination_score if x.hallucination_score is not None else -1.0), reverse=True)
         elif sort_by == "score_asc":
-            items.sort(key=lambda x: (x.hallucination_score if x.hallucination_score is not None else 999.0))
-            offset = max(0, (page - 1) * page_size)
-            items = items[offset:offset + page_size]
+            all_items.sort(key=lambda x: (x.hallucination_score if x.hallucination_score is not None else 999.0))
+        else:
+            all_items.sort(key=lambda x: x.created_at, reverse=True)
 
+        total_count = len(all_items)
         total_pages = max(1, math.ceil(total_count / page_size)) if page_size > 0 else 1
+        offset = max(0, (page - 1) * page_size)
+        paginated_items = all_items[offset:offset + page_size]
 
         return EvaluationHistoryResponse(
             total_count=total_count,
             page=page,
             page_size=page_size,
             total_pages=total_pages,
-            items=items
+            items=paginated_items
         )
 
     async def export_history_csv(
@@ -396,25 +518,15 @@ class EvaluationService:
         evaluation_type: Optional[str] = None,
     ) -> str:
         """Generates a downloadable CSV containing all evaluations for the authenticated user."""
-        conditions = [Evaluation.user_id == user_id]
-        if chatbot_id and chatbot_id.strip():
-            conditions.append(Evaluation.chatbot_id == chatbot_id.strip())
-        if evaluation_type == "single":
-            conditions.append(Evaluation.batch_job_id.is_(None))
-        elif evaluation_type == "batch":
-            conditions.append(Evaluation.batch_job_id.is_not(None))
-
-        stmt = (
-            select(Evaluation)
-            .options(
-                selectinload(Evaluation.metrics),
-                selectinload(Evaluation.chatbot)
-            )
-            .where(*conditions)
-            .order_by(Evaluation.created_at.desc())
+        res = await self.list_history(
+            user_id=user_id,
+            chatbot_id=chatbot_id,
+            evaluation_type=evaluation_type,
+            page=1,
+            page_size=10000,
+            sort_by="date_desc"
         )
-        res = await self.db.execute(stmt)
-        records = res.scalars().all()
+        records = res.items
 
         output = io.StringIO()
         writer = csv.writer(output, quoting=csv.QUOTE_MINIMAL)
@@ -430,29 +542,140 @@ class EvaluationService:
             "Hallucination Risk Level",
             "Latency (ms)",
             "Status",
-            "Error Message",
         ])
 
         for ev in records:
-            h_metric = next((m for m in ev.metrics if m.metric_type == "hallucination"), None)
-            h_score = f"{h_metric.raw_score:.4f}" if (h_metric and h_metric.raw_score is not None) else "N/A"
-            h_risk = h_metric.risk_level if h_metric else "unknown"
-            bot_name = ev.chatbot.name if ev.chatbot else ("Batch CSV Job" if ev.batch_job_id else "Direct Benchmark")
-            eval_type = "batch" if ev.batch_job_id else "single"
-
+            h_score = f"{ev.hallucination_score:.4f}" if ev.hallucination_score is not None else "N/A"
             writer.writerow([
                 ev.id,
-                ev.created_at.strftime("%Y-%m-%d %H:%M:%S"),
-                bot_name,
-                eval_type,
+                ev.created_at.strftime("%Y-%m-%d %H:%M:%S") if hasattr(ev.created_at, "strftime") else str(ev.created_at),
+                ev.chatbot_name,
+                ev.evaluation_type,
                 ev.prompt,
                 ev.chatbot_response,
                 ev.reference_evidence or "",
                 h_score,
-                h_risk,
+                ev.risk_level,
                 f"{ev.response_latency_ms:.1f}",
                 ev.status,
-                ev.error_message or "",
             ])
 
         return output.getvalue()
+
+    async def delete_evaluation(self, user_id: str, evaluation_id: str) -> bool:
+        """Deletes a single evaluation record after strictly verifying user ownership.
+
+        Supports Single Prompt, Batch, and TestLab evaluations.
+        Raises:
+            HTTPException 403 if record exists but belongs to another user.
+            HTTPException 404 if record does not exist.
+        """
+        from app.models.testlab_run import TestLabRun
+        from app.models.batch_job import BatchJob
+
+        # 1. Check in evaluations table
+        stmt = select(Evaluation).where(Evaluation.id == evaluation_id)
+        res = await self.db.execute(stmt)
+        evaluation = res.scalar_one_or_none()
+
+        if evaluation:
+            if evaluation.user_id != user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You do not have permission to delete this evaluation."
+                )
+
+            batch_job_id = evaluation.batch_job_id
+            await self.db.delete(evaluation)
+            await self.db.flush()
+
+            # If part of a batch job, check if any evaluations remain for that batch job
+            if batch_job_id:
+                chk_stmt = select(func.count(Evaluation.id)).where(Evaluation.batch_job_id == batch_job_id)
+                remaining = (await self.db.execute(chk_stmt)).scalar() or 0
+                if remaining == 0:
+                    bj_res = await self.db.execute(select(BatchJob).where(BatchJob.id == batch_job_id))
+                    bj = bj_res.scalar_one_or_none()
+                    if bj:
+                        await self.db.delete(bj)
+
+            await self.db.commit()
+            return True
+
+        # 2. Check in testlab_runs table
+        tl_stmt = select(TestLabRun).where(TestLabRun.id == evaluation_id)
+        tl_res = await self.db.execute(tl_stmt)
+        tl_run = tl_res.scalar_one_or_none()
+
+        if tl_run:
+            if tl_run.user_id != user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You do not have permission to delete this evaluation."
+                )
+            await self.db.delete(tl_run)
+            await self.db.commit()
+            return True
+
+        # 3. Check in batch_jobs table (if a batch job ID was passed)
+        bj_stmt = select(BatchJob).where(BatchJob.id == evaluation_id)
+        bj_res = await self.db.execute(bj_stmt)
+        b_job = bj_res.scalar_one_or_none()
+        if b_job:
+            if b_job.user_id != user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You do not have permission to delete this evaluation."
+                )
+            await self.db.execute(delete(Evaluation).where(Evaluation.batch_job_id == b_job.id))
+            await self.db.delete(b_job)
+            await self.db.commit()
+            return True
+
+        # Record not found anywhere
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Evaluation record not found."
+        )
+
+    async def delete_all_evaluations(self, user_id: str, evaluation_type: Optional[str] = None) -> int:
+        """Deletes all evaluation records for the authenticated user, optionally filtered by type.
+
+        Only deletes records strictly where user_id == user_id.
+        Never touches other users' records or chatbot configurations.
+        """
+        from app.models.testlab_run import TestLabRun
+        from app.models.batch_job import BatchJob
+
+        total_deleted = 0
+        clean_type = (evaluation_type or "all").lower().strip()
+
+        # 1. Single evaluations
+        if clean_type in ("all", "single"):
+            single_stmt = delete(Evaluation).where(
+                Evaluation.user_id == user_id,
+                Evaluation.batch_job_id.is_(None)
+            )
+            res = await self.db.execute(single_stmt)
+            total_deleted += res.rowcount or 0
+
+        # 2. Batch evaluations and batch jobs
+        if clean_type in ("all", "batch"):
+            batch_eval_stmt = delete(Evaluation).where(
+                Evaluation.user_id == user_id,
+                Evaluation.batch_job_id.is_not(None)
+            )
+            res = await self.db.execute(batch_eval_stmt)
+            total_deleted += res.rowcount or 0
+
+            bj_stmt = delete(BatchJob).where(BatchJob.user_id == user_id)
+            await self.db.execute(bj_stmt)
+
+        # 3. TestLab runs
+        if clean_type in ("all", "testlab"):
+            tl_stmt = delete(TestLabRun).where(TestLabRun.user_id == user_id)
+            tl_res = await self.db.execute(tl_stmt)
+            total_deleted += tl_res.rowcount or 0
+
+        await self.db.commit()
+        return total_deleted

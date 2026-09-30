@@ -90,3 +90,14 @@ export const downloadReportJson = async (runId, chatbotName = 'Chatbot') => {
   link.parentNode.removeChild(link);
   window.URL.revokeObjectURL(url);
 };
+
+export const deleteTestRun = async (runId) => {
+  const response = await api.delete(`/testlab/runs/${runId}`);
+  return response.data;
+};
+
+export const deleteAllTestRuns = async () => {
+  const response = await api.delete('/testlab/runs');
+  return response.data;
+};
+
